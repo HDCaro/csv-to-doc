@@ -97,12 +97,27 @@ def create_compact_discography_table():
     compact_paragraph(title)
     title.runs[0].font.size = Pt(18)
 
-    # Subtitle
-    subtitle = doc.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    compact_paragraph(subtitle)
-    run = subtitle.add_run(f'Compact Chronological Format • {total_tracks} Tracks • {year_range}')
-    run.font.size = Pt(11)
+    # Summary (compact)
+    summary = doc.add_paragraph()
+    summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    compact_paragraph(summary)
+
+    run = summary.add_run(
+        f"This discography lists {total_tracks} tracks from {year_range}, "
+        "documenting Richard Niles’ work as producer (P), arranger (A), and composer (C)."
+    )
+    run.font.size = Pt(9)
+    run.italic = True
+
+    # Legend above table
+    legend_top = doc.add_paragraph()
+    legend_top.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    compact_paragraph(legend_top)
+
+    run = legend_top.add_run(
+        "P = Producer | A = Arranger | C = Composer • Grey lines separate years"
+    )
+    run.font.size = Pt(8)
     run.italic = True
 
     # Table
@@ -206,24 +221,14 @@ def create_compact_discography_table():
 
         table_row.height = Pt(12)
 
-    # Legend
-    doc.add_heading('Role Legend', 2)
-    p = doc.add_paragraph()
-    compact_paragraph(p)
-    p.add_run('P').bold = True
-    p.add_run(' = Producer • ')
-    p.add_run('A').bold = True
-    p.add_run(' = Arranger • ')
-    p.add_run('C').bold = True
-    p.add_run(' = Composer • Other roles listed in full')
-
-    # Notes
+    # Format Notes
     doc.add_heading('Format Notes', 2)
     p = doc.add_paragraph()
     compact_paragraph(p)
-    p.add_run('This compact format presents all ')
-    p.add_run(f'{total_tracks} tracks').bold = True
-    p.add_run(' in a space-efficient layout with aligned columns and minimal spacing.')
+    p.add_run(
+        "Artist and album names appear only on first occurrence within each grouping. "
+        "Subsequent rows omit repeated values to improve readability and reduce visual clutter."
+    )
 
     # Save
     doc.save('richard_niles_discography_compact.docx')
