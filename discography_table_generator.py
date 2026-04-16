@@ -97,27 +97,15 @@ def create_compact_discography_table():
     compact_paragraph(title)
     title.runs[0].font.size = Pt(18)
 
-    # Summary (compact)
+    # Compact Summary
     summary = doc.add_paragraph()
     summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
     compact_paragraph(summary)
 
     run = summary.add_run(
-        f"This discography lists {total_tracks} tracks from {year_range}, "
-        "documenting Richard Niles’ work as producer (P), arranger (A), and composer (C)."
+        f"Discography of {total_tracks} tracks ({year_range}), documenting Richard Niles’ work as producer (P), arranger (A), and composer (C)."
     )
     run.font.size = Pt(9)
-    run.italic = True
-
-    # Legend above table
-    legend_top = doc.add_paragraph()
-    legend_top.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    compact_paragraph(legend_top)
-
-    run = legend_top.add_run(
-        "P = Producer | A = Arranger | C = Composer • Grey lines separate years"
-    )
-    run.font.size = Pt(8)
     run.italic = True
 
     # Table
@@ -220,15 +208,6 @@ def create_compact_discography_table():
             add_border_to_cell(cell, "top")
 
         table_row.height = Pt(12)
-
-    # Format Notes
-    doc.add_heading('Format Notes', 2)
-    p = doc.add_paragraph()
-    compact_paragraph(p)
-    p.add_run(
-        "Artist and album names appear only on first occurrence within each grouping. "
-        "Subsequent rows omit repeated values to improve readability and reduce visual clutter."
-    )
 
     # Save
     doc.save('richard_niles_discography_compact.docx')
