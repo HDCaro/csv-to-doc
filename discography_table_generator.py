@@ -1,14 +1,13 @@
 import pandas as pd
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.shared import OxmlElement, qn
 from datetime import datetime
 
 
-def add_border_to_cell(cell, border_type="bottom", color="4F81BD", size=2):
-    """Add border to table cell"""
+def add_border_to_cell(cell, border_type="bottom", color="808080", size=2):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
 
@@ -28,16 +27,20 @@ def add_border_to_cell(cell, border_type="bottom", color="4F81BD", size=2):
 
 
 def compact_paragraph(paragraph):
-    """Force compact spacing"""
     pf = paragraph.paragraph_format
     pf.space_before = Pt(0)
     pf.space_after = Pt(0)
     pf.line_spacing = 1
 
 
+def set_heading2_grey(doc):
+    style = doc.styles['Heading 2']
+    font = style.font
+    font.color.rgb = RGBColor(89, 89, 89)
+
+
 def create_compact_discography_table():
 
-    # Load data
     try:
         df = pd.read_csv(
             'richard_niles_discography.csv',
@@ -48,7 +51,6 @@ def create_compact_discography_table():
         print("Error: richard_niles_discography.csv not found")
         return
 
-    # Clean data
     df = df.fillna('')
     df['producer'] = df['producer'].astype(str) == 'True'
     df['arranger'] = df['arranger'].astype(str) == 'True'
@@ -60,13 +62,12 @@ def create_compact_discography_table():
 
     df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
 
-    # Stats
     total_tracks = len(df_sorted)
     total_years = df_sorted['year'].nunique()
     year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
 
-    # Create document
     doc = Document()
+    set_heading2_grey(doc)
 
     for section in doc.sections:
         section.top_margin = Inches(0.5)
@@ -127,7 +128,7 @@ def create_compact_discography_table():
                 run.font.bold = True
                 run.font.size = Pt(10)
 
-        add_border_to_cell(cell, "bottom", "000000", 4)
+        add_border_to_cell(cell, "bottom", "808080", 4)
 
     current_year = None
 
