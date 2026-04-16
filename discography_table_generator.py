@@ -1,23 +1,29 @@
 import pandas as pd
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.shared import OxmlElement, qn
-from datetime import datetime
 
+# ----------------------------
+# CONFIG
+# ----------------------------
+OUTPUT_FILE = 'discography_fixed.docx'
 
+# Optional: use your book as base (inherits odd/even, headers, margins)
+USE_BOOK_AS_TEMPLATE = True
+BOOK_PATH = 'HITS AND HAPPINESS FINAL Format.docx'
+
+# ----------------------------
+# Helpers
+# ----------------------------
 def add_border_to_cell(cell, border_type="bottom", color="808080", size=2):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
 
     tcBorders = OxmlElement('w:tcBorders')
 
-    if border_type == "bottom":
-        border = OxmlElement('w:bottom')
-    else:
-        border = OxmlElement('w:top')
-
+    border = OxmlElement(f'w:{border_type}')
     border.set(qn('w:val'), 'single')
     border.set(qn('w:sz'), str(size * 4))
     border.set(qn('w:color'), color)
@@ -31,73 +37,63 @@ def compact_paragraph(paragraph):
     pf.space_before = Pt(0)
     pf.space_after = Pt(0)
     pf.line_spacing = 1
+    pf.keep_together = True  # avoid awkward breaks within a paragraph
 
 
-def set_heading2_grey(doc):
-    style = doc.styles['Heading 2']
-    font = style.font
-    font.color.rgb = RGBColor(89, 89, 89)
+def prevent_row_split(row):
+    tr = row._tr
+    trPr = tr.get_or_add_trPr()
+    cantSplit = OxmlElement('w:cantSplit')
+    trPr.append(cantSplit)
 
 
 def create_compact_discography_table():
 
-    try:
-        df = pd.read_csv(
-            'richard_niles_discography.csv',
-            sep='\t',
-            encoding='cp1252'
-        )
-    except FileNotFoundError:
-        print("Error: richard_niles_discography.csv not found")
-        return
+    # ----------------------------
+    # Load data
+    # ----------------------------
+    df = pd.read_csv(
+        'richard_niles_discography.csv',
+        sep='\t',
+        encoding='cp1252'
+    )
 
     df = df.fillna('')
-    df['producer'] = df['producer'].astype(str) == 'True'
-    df['arranger'] = df['arranger'].astype(str) == 'True'
-    df['composer'] = df['composer'].astype(str) == 'True'
-
     df['year'] = pd.to_numeric(df['year'], errors='coerce')
     df = df.dropna(subset=['year'])
     df['year'] = df['year'].astype(int)
 
     df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
 
+    # ----------------------------
+    # Stats (for console output)
+    # ----------------------------
     total_tracks = len(df_sorted)
     total_years = df_sorted['year'].nunique()
     year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
 
-    doc = Document()
-    set_heading2_grey(doc)
+    # ----------------------------
+    # Document creation
+    # ----------------------------
+    if USE_BOOK_AS_TEMPLATE:
+        doc = Document(BOOK_PATH)
 
-    for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
+        # Add a new section (starts on new page)
+        from docx.enum.section import WD_SECTION
+        doc.add_section(WD_SECTION.NEW_PAGE)
+    else:
+        doc = Document()
 
-    # Header
-    header = doc.sections[0].header
-    p = header.paragraphs[0]
-    p.text = "Richard Niles Discography by Year - Compact Format"
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    compact_paragraph(p)
-    p.runs[0].font.size = Pt(9)
-
-    # Footer
-    footer = doc.sections[0].footer
-    p = footer.paragraphs[0]
-    p.text = f"{total_tracks} Tracks • {total_years} Years ({year_range}) • Generated {datetime.now().strftime('%B %d, %Y')}"
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    compact_paragraph(p)
-    p.runs[0].font.size = Pt(8)
-
+    # ----------------------------
     # Title
+    # ----------------------------
     title = doc.add_heading('Richard Niles Discography by Year', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     compact_paragraph(title)
-    title.runs[0].font.size = Pt(18)
 
+    # ----------------------------
     # Compact Summary
+    # ----------------------------
     summary = doc.add_paragraph()
     summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
     compact_paragraph(summary)
@@ -108,15 +104,17 @@ def create_compact_discography_table():
     run.font.size = Pt(9)
     run.italic = True
 
+    # ----------------------------
     # Table
+    # ----------------------------
     table = doc.add_table(rows=1, cols=5)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False  # 🔥 critical for stable layout
 
-    table.columns[0].width = Inches(0.65)
-    table.columns[1].width = Inches(1.46)
-    table.columns[2].width = Inches(1.46)
-    table.columns[3].width = Inches(1.46)
-    table.columns[4].width = Inches(0.84)
+    widths = [0.65, 1.46, 1.46, 1.46, 0.84]
+
+    for i, w in enumerate(widths):
+        table.columns[i].width = Inches(w)
 
     headers = ['Year', 'Artist', 'Album', 'Track Title', 'Role']
 
@@ -128,93 +126,79 @@ def create_compact_discography_table():
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             compact_paragraph(p)
             for run in p.runs:
-                run.font.bold = True
                 run.font.size = Pt(10)
+                run.font.bold = True
 
         add_border_to_cell(cell, "bottom", "808080", 4)
 
+    # ----------------------------
+    # Data rows
+    # ----------------------------
     current_year = None
 
     for _, row in df_sorted.iterrows():
 
         roles = []
-        if row['producer']: roles.append('P')
-        if row['arranger']: roles.append('A')
-        if row['composer']: roles.append('C')
-        if row['other_roles']: roles.append(str(row['other_roles']))
+        if str(row.get('producer')) == 'True': roles.append('P')
+        if str(row.get('arranger')) == 'True': roles.append('A')
+        if str(row.get('composer')) == 'True': roles.append('C')
 
         role_text = ', '.join(roles)
 
         table_row = table.add_row()
+        prevent_row_split(table_row)
+
         cells = table_row.cells
+
+        # reinforce widths each row
+        for i, w in enumerate(widths):
+            cells[i].width = Inches(w)
 
         is_first = current_year != row['year']
         if is_first:
             current_year = row['year']
 
-        # Year
-        cell = cells[0]
-        cell.text = str(row['year']) if is_first else ""
-        for p in cell.paragraphs:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            compact_paragraph(p)
-            for run in p.runs:
-                run.font.bold = True
-                run.font.size = Pt(10)
-        if is_first:
-            add_border_to_cell(cell, "top")
+        values = [
+            str(row['year']) if is_first else "",
+            str(row['artist']).strip(),
+            str(row['album']).strip(),
+            str(row['track_title']).strip(),
+            role_text
+        ]
 
-        # Artist
-        cell = cells[1]
-        cell.text = str(row['artist'])
-        for p in cell.paragraphs:
-            compact_paragraph(p)
-            for run in p.runs:
-                run.font.size = Pt(9)
-        if is_first:
-            add_border_to_cell(cell, "top")
+        for i, val in enumerate(values):
+            cell = cells[i]
+            cell.text = val
 
-        # Album
-        cell = cells[2]
-        cell.text = str(row['album'])
-        for p in cell.paragraphs:
-            compact_paragraph(p)
-            for run in p.runs:
-                run.font.size = Pt(9)
-                run.font.italic = True
-        if is_first:
-            add_border_to_cell(cell, "top")
+            for p in cell.paragraphs:
+                compact_paragraph(p)
 
-        # Track
-        cell = cells[3]
-        cell.text = str(row['track_title'])
-        for p in cell.paragraphs:
-            compact_paragraph(p)
-            for run in p.runs:
-                run.font.size = Pt(9)
-        if is_first:
-            add_border_to_cell(cell, "top")
+                if i == 0 or i == 4:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                else:
+                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-        # Role
-        cell = cells[4]
-        cell.text = role_text
-        for p in cell.paragraphs:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            compact_paragraph(p)
-            for run in p.runs:
-                run.font.size = Pt(8)
-                run.font.bold = True
+                for run in p.runs:
+                    run.font.size = Pt(9)
+
+        # full-width year separator
         if is_first:
-            add_border_to_cell(cell, "top")
+            for cell in cells:
+                add_border_to_cell(cell, "top", "808080", 2)
 
         table_row.height = Pt(12)
 
-    # Save
-    doc.save('richard_niles_discography_compact.docx')
+    # ----------------------------
+    # Save + reporting
+    # ----------------------------
+    doc.save(OUTPUT_FILE)
 
-    print("Document generated successfully.")
+    print("\n--- Discography Generation Complete ---")
+    print(f"File: {OUTPUT_FILE}")
     print(f"Tracks: {total_tracks}")
     print(f"Years: {year_range}")
+    print(f"Total years: {total_years}")
+    print("--------------------------------------\n")
 
 
 if __name__ == "__main__":
