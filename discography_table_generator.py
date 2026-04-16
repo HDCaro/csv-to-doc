@@ -6,36 +6,15 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_SECTION
 from docx.oxml.shared import OxmlElement, qn
 
-# ----------------------------
-# CONFIG
-# ----------------------------
 BOOK_PATH = 'HITS AND HAPPINESS FINAL Format.docx'
 OUTPUT_FILE = 'Hits And Happiness Final Discog.docx'
 
 
-# ----------------------------
-# Helpers
-# ----------------------------
-def add_border_to_cell(cell, border_type="bottom", color="808080", size=2):
-    tc = cell._tc
-    tcPr = tc.get_or_add_tcPr()
-
-    tcBorders = OxmlElement('w:tcBorders')
-    border = OxmlElement(f'w:{border_type}')
-    border.set(qn('w:val'), 'single')
-    border.set(qn('w:sz'), str(size * 4))
-    border.set(qn('w:color'), color)
-
-    tcBorders.append(border)
-    tcPr.append(tcBorders)
-
-
-def compact_paragraph(paragraph):
-    pf = paragraph.paragraph_format
+def compact_paragraph(p):
+    pf = p.paragraph_format
     pf.space_before = Pt(0)
     pf.space_after = Pt(0)
     pf.line_spacing = 1
-    pf.keep_together = True
 
 
 def prevent_row_split(row):
@@ -44,9 +23,6 @@ def prevent_row_split(row):
     trPr.append(OxmlElement('w:cantSplit'))
 
 
-# ----------------------------
-# Main
-# ----------------------------
 def create_discography():
 
     df = pd.read_csv(
@@ -63,25 +39,24 @@ def create_discography():
     df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
 
     total_tracks = len(df_sorted)
-    total_years = df_sorted['year'].nunique()
     year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
 
     # ----------------------------
-    # Open book template
+    # GROUP DATA (KEY PART)
+    # ----------------------------
+    grouped = df_sorted.groupby(['year', 'artist', 'album'])
+
+    # ----------------------------
+    # OPEN BOOK
     # ----------------------------
     doc = Document(BOOK_PATH)
     doc.add_section(WD_SECTION.NEW_PAGE)
 
     # ----------------------------
-    # TITLE (ALL CAPS, Georgia 16)
+    # TITLE
     # ----------------------------
     title = doc.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR")
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    pf = title.paragraph_format
-    pf.space_before = Pt(0)
-    pf.space_after = Pt(0)
-    pf.line_spacing = 1
 
     for run in title.runs:
         run.bold = True
@@ -97,44 +72,17 @@ def create_discography():
     )
     summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    pf = summary.paragraph_format
-    pf.space_before = Pt(0)
-    pf.space_after = Pt(0)
-    pf.line_spacing = 1
-
     for run in summary.runs:
         run.font.size = Pt(9)
         run.italic = True
 
     # ----------------------------
-    # ROLE LEGEND LINE
+    # SIMPLIFIED TABLE
     # ----------------------------
-    legend = doc.add_paragraph(
-        "P = Producer | A = Arranger | C = Composer"
-    )
-    legend.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    pf = legend.paragraph_format
-    pf.space_before = Pt(0)
-    pf.space_after = Pt(0)
-    pf.line_spacing = 1
-
-    for run in legend.runs:
-        run.font.size = Pt(8)
-
-    # ----------------------------
-    # TABLE
-    # ----------------------------
-    table = doc.add_table(rows=1, cols=5)
+    table = doc.add_table(rows=1, cols=4)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.autofit = False
 
-    widths = [0.65, 1.46, 1.46, 1.46, 0.84]
-
-    for i, w in enumerate(widths):
-        table.columns[i].width = Inches(w)
-
-    headers = ['Year', 'Artist', 'Album', 'Track Title', 'Role']
+    headers = ['Artist', 'Album', 'Details', 'Role']
 
     for i, text in enumerate(headers):
         cell = table.rows[0].cells[i]
@@ -142,73 +90,67 @@ def create_discography():
 
         for p in cell.paragraphs:
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            compact_paragraph(p)
             for run in p.runs:
                 run.bold = True
                 run.font.size = Pt(10)
 
-        add_border_to_cell(cell, "bottom", "808080", 4)
-
     current_year = None
 
-    for _, row in df_sorted.iterrows():
+    for (year, artist, album), group in grouped:
 
-        table_row = table.add_row()
-        prevent_row_split(table_row)
+        # YEAR ROW
+        if year != current_year:
+            current_year = year
 
-        cells = table_row.cells
+            row = table.add_row()
+            merged = row.cells[0]
+            for i in range(1, 4):
+                merged = merged.merge(row.cells[i])
 
-        for i, w in enumerate(widths):
-            cells[i].width = Inches(w)
+            merged.text = str(year)
 
-        is_first = current_year != row['year']
-        if is_first:
-            current_year = row['year']
+            for p in merged.paragraphs:
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                for run in p.runs:
+                    run.bold = True
+                    run.font.size = Pt(11)
 
-        values = [
-            str(row['year']) if is_first else "",
-            str(row['artist']).strip(),
-            str(row['album']).strip(),
-            str(row['track_title']).strip(),
-            ""
-        ]
+        # ROLE (aggregate)
+        roles = set()
+        for _, r in group.iterrows():
+            if str(r.get('producer')) == 'True': roles.add('P')
+            if str(r.get('arranger')) == 'True': roles.add('A')
+            if str(r.get('composer')) == 'True': roles.add('C')
 
-        roles = []
-        if str(row.get('producer')) == 'True': roles.append('P')
-        if str(row.get('arranger')) == 'True': roles.append('A')
-        if str(row.get('composer')) == 'True': roles.append('C')
+        role_text = ', '.join(sorted(roles))
 
-        values[4] = ', '.join(roles)
+        # DETAILS
+        if len(group) == 1:
+            details = group.iloc[0]['track_title']
+            album_label = "Single"
+        else:
+            details = f"{len(group)} tracks"
+            album_label = album
 
-        for i, val in enumerate(values):
-            cell = cells[i]
-            cell.text = val
+        # ROW
+        row = table.add_row()
+        prevent_row_split(row)
 
+        row.cells[0].text = artist
+        row.cells[1].text = album_label
+        row.cells[2].text = details
+        row.cells[3].text = role_text
+
+        for i, cell in enumerate(row.cells):
             for p in cell.paragraphs:
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT if i < 3 else WD_ALIGN_PARAGRAPH.CENTER
                 compact_paragraph(p)
-
-                if i == 0 or i == 4:
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                else:
-                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
                 for run in p.runs:
                     run.font.size = Pt(9)
 
-        if is_first:
-            for cell in cells:
-                add_border_to_cell(cell, "top", "808080", 2)
-
-        table_row.height = Pt(12)
-
     doc.save(OUTPUT_FILE)
 
-    print("\n--- Discography Generation Complete ---")
-    print(f"File: {OUTPUT_FILE}")
-    print(f"Tracks: {total_tracks}")
-    print(f"Years: {year_range}")
-    print(f"Total years: {total_years}")
-    print("--------------------------------------\n")
+    print("Book version generated.")
 
 
 if __name__ == "__main__":
