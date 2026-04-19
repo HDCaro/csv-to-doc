@@ -8,6 +8,7 @@ from docx.oxml.shared import OxmlElement, qn
 
 BOOK_PATH = 'HITS AND HAPPINESS FINAL Format.docx'
 OUTPUT_FILE = 'Hits And Happiness Final Discog.docx'
+TABLE_ONLY_FILE = 'Richard Niles Discography Table.docx'
 
 
 # ----------------------------
@@ -56,8 +57,19 @@ def split_artists(text):
     return ",\n".join(parts)
 
 
+def set_table_full_width(table):
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+
+    tblW = OxmlElement('w:tblW')
+    tblW.set(qn('w:type'), 'pct')
+    tblW.set(qn('w:w'), '5000')  # 100%
+
+    tblPr.append(tblW)
+
+
 # ----------------------------
-# Adaptive sizing (balanced)
+# Column ratios
 # ----------------------------
 def compute_column_ratios(df_grouped):
     max_artist = 1
@@ -78,7 +90,6 @@ def compute_column_ratios(df_grouped):
     role_weight = 6
     total = max_artist + max_album + max_details + role_weight
 
-    # Optical adjustment
     artist = (max_artist / total) * 0.85
     album = (max_album / total)
     details = (max_details / total) * 1.10
@@ -95,79 +106,20 @@ def compute_column_ratios(df_grouped):
 
 
 # ----------------------------
-# Main
+# Build table
 # ----------------------------
-def create_discography():
+def build_table(doc, grouped, col_ratios):
 
-    df = pd.read_csv(
-        'richard_niles_discography.csv',
-        sep='\t',
-        encoding='cp1252'
-    )
-
-    df = df.fillna('')
-    df['year'] = pd.to_numeric(df['year'], errors='coerce')
-    df = df.dropna(subset=['year'])
-    df['year'] = df['year'].astype(int)
-
-    df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
-    grouped = df_sorted.groupby(['year', 'artist', 'album'])
-
-    total_tracks = len(df_sorted)
-    year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
-
-    col_ratios = compute_column_ratios(grouped)
-
-    doc = Document(BOOK_PATH)
-    doc.add_section(WD_SECTION.NEW_PAGE)
-
-    # ----------------------------
-    # Title
-    # ----------------------------
-    title = doc.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR")
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    for run in title.runs:
-        run.bold = True
-        run.font.size = Pt(16)
-        run.font.name = "Georgia"
-
-    # ----------------------------
-    # Summary
-    # ----------------------------
-    summary = doc.add_paragraph(
-        f"Discography of {total_tracks} tracks ({year_range}), documenting Richard Niles’ work as producer (P), arranger (A), and composer (C)."
-    )
-    summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    for run in summary.runs:
-        run.font.size = Pt(9)
-        run.italic = True
-
-    # ----------------------------
-    # Table
-    # ----------------------------
     table = doc.add_table(rows=1, cols=4)
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
     table.autofit = False
     table.allow_autofit = False
 
-    # 🔥 EXACT WIDTH FIX (no gap, no overflow)
-    EMU_PER_INCH = 914400
-    section = doc.sections[-1]
-    usable_width = section.page_width - section.left_margin - section.right_margin
-    usable_inches = usable_width / EMU_PER_INCH
+    # 🔥 Match document table style
+    table.style = 'Table Grid'
 
-    raw_widths = [usable_inches * r for r in col_ratios]
-
-    # correction to eliminate rounding gap
-    correction = usable_inches - sum(raw_widths)
-    raw_widths[2] += correction  # apply to DETAILS column
-
-    widths = [Inches(w) for w in raw_widths]
-
-    for i, w in enumerate(widths):
-        table.columns[i].width = w
+    # 🔥 Force full width (Word handles layout)
+    set_table_full_width(table)
 
     headers = ['Artist', 'Album', 'Details', 'Role']
 
@@ -215,9 +167,6 @@ def create_discography():
         row = table.add_row()
         prevent_row_split(row)
 
-        for i, w in enumerate(widths):
-            row.cells[i].width = w
-
         artist_text = split_artists(smart_text(artist, 60, 120))
 
         set_cell_text(row.cells[0], artist_text, hanging=True)
@@ -225,9 +174,74 @@ def create_discography():
         set_cell_text(row.cells[2], details, hanging=True)
         set_cell_text(row.cells[3], role_text, WD_ALIGN_PARAGRAPH.CENTER)
 
+    return table
+
+
+# ----------------------------
+# Main
+# ----------------------------
+def create_discography():
+
+    df = pd.read_csv(
+        'richard_niles_discography.csv',
+        sep='\t',
+        encoding='cp1252'
+    )
+
+    df = df.fillna('')
+    df['year'] = pd.to_numeric(df['year'], errors='coerce')
+    df = df.dropna(subset=['year'])
+    df['year'] = df['year'].astype(int)
+
+    df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
+    grouped = df_sorted.groupby(['year', 'artist', 'album'])
+
+    total_tracks = len(df_sorted)
+    year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
+
+    col_ratios = compute_column_ratios(grouped)
+
+    # ----------------------------
+    # BOOK VERSION
+    # ----------------------------
+    doc = Document(BOOK_PATH)
+    doc.add_section(WD_SECTION.NEW_PAGE)
+
+    title = doc.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR")
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for run in title.runs:
+        run.bold = True
+        run.font.size = Pt(16)
+        run.font.name = "Georgia"
+
+    # 🔥 FIXED LINE BREAK
+    summary = doc.add_paragraph(
+        f"Discography of {total_tracks} tracks ({year_range}), documenting Richard Niles’ work as\nproducer (P), arranger (A), and composer (C)."
+    )
+    summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for run in summary.runs:
+        run.font.size = Pt(9)
+        run.italic = True
+
+    build_table(doc, grouped, col_ratios)
+
     doc.save(OUTPUT_FILE)
 
-    print("\n✔ FINAL PERFECT FIT — no overflow, no gap, margins aligned\n")
+    # ----------------------------
+    # TABLE ONLY
+    # ----------------------------
+    doc2 = Document()
+
+    title2 = doc2.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR")
+    title2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    build_table(doc2, grouped, col_ratios)
+
+    doc2.save(TABLE_ONLY_FILE)
+
+    print("\n✔ FINAL — perfect layout + style + width\n")
 
 
 if __name__ == "__main__":
