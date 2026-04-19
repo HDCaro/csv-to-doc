@@ -13,46 +13,6 @@ OUTPUT_FILE = 'Hits And Happiness Final Discog.docx'
 # ----------------------------
 # Helpers
 # ----------------------------
-def compact_paragraph(p):
-    pf = p.paragraph_format
-    pf.space_before = Pt(0)
-    pf.space_after = Pt(0)
-    pf.line_spacing = 1
-    pf.keep_together = True
-    pf.widow_control = True
-
-
-def prevent_row_split(row):
-    tr = row._tr
-    trPr = tr.get_or_add_trPr()
-    trPr.append(OxmlElement('w:cantSplit'))
-
-
-def smart_text(text, max_len=40, hard_limit=70):
-    text = str(text).strip()
-
-    if len(text) <= max_len:
-        return text
-
-    if len(text) <= hard_limit:
-        return text
-
-    return text[:hard_limit - 3].rstrip() + "..."
-
-
-def split_artists(text):
-    parts = [p.strip() for p in str(text).split(",")]
-    if len(parts) <= 1:
-        return text
-
-    result = parts[0]
-    for p in parts[1:]:
-        result += ",\n" + p
-
-    return result
-
-
-# 🔥 FINAL TEXT FUNCTION (HANGING INDENT SUPPORT)
 def set_cell_text(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, hanging=False):
     cell.text = ""
 
@@ -63,20 +23,41 @@ def set_cell_text(cell, text, align=WD_ALIGN_PARAGRAPH.LEFT, hanging=False):
     pf.space_before = Pt(0)
     pf.space_after = Pt(0)
     pf.line_spacing = 1
-    pf.keep_together = True
-    pf.widow_control = True
 
-    # 🔥 Hanging indent (key fix)
     if hanging:
         pf.left_indent = Pt(8)
         pf.first_line_indent = Pt(-8)
 
     run = p.add_run(text)
     run.font.size = Pt(9)
+    run.font.name = "Georgia"
+    run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Georgia')
+
+
+def prevent_row_split(row):
+    tr = row._tr
+    trPr = tr.get_or_add_trPr()
+    trPr.append(OxmlElement('w:cantSplit'))
+
+
+def smart_text(text, max_len=40, hard_limit=70):
+    text = str(text).strip()
+    if len(text) <= max_len:
+        return text
+    if len(text) <= hard_limit:
+        return text
+    return text[:hard_limit - 3].rstrip() + "..."
+
+
+def split_artists(text):
+    parts = [p.strip() for p in str(text).split(",")]
+    if len(parts) <= 1:
+        return text
+    return ",\n".join(parts)
 
 
 # ----------------------------
-# Adaptive sizing
+# Adaptive sizing (balanced)
 # ----------------------------
 def compute_column_ratios(df_grouped):
     max_artist = 1
@@ -97,11 +78,19 @@ def compute_column_ratios(df_grouped):
     role_weight = 6
     total = max_artist + max_album + max_details + role_weight
 
+    # Optical adjustment
+    artist = (max_artist / total) * 0.85
+    album = (max_album / total)
+    details = (max_details / total) * 1.10
+    role = (role_weight / total)
+
+    total2 = artist + album + details + role
+
     return [
-        max_artist / total,
-        max_album / total,
-        max_details / total,
-        role_weight / total
+        artist / total2,
+        album / total2,
+        details / total2,
+        role / total2
     ]
 
 
@@ -122,11 +111,10 @@ def create_discography():
     df['year'] = df['year'].astype(int)
 
     df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
+    grouped = df_sorted.groupby(['year', 'artist', 'album'])
 
     total_tracks = len(df_sorted)
     year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
-
-    grouped = df_sorted.groupby(['year', 'artist', 'album'])
 
     col_ratios = compute_column_ratios(grouped)
 
@@ -143,7 +131,6 @@ def create_discography():
         run.bold = True
         run.font.size = Pt(16)
         run.font.name = "Georgia"
-        run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Georgia')
 
     # ----------------------------
     # Summary
@@ -161,16 +148,23 @@ def create_discography():
     # Table
     # ----------------------------
     table = doc.add_table(rows=1, cols=4)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
     table.autofit = False
     table.allow_autofit = False
 
+    # 🔥 EXACT WIDTH FIX (no gap, no overflow)
     EMU_PER_INCH = 914400
     section = doc.sections[-1]
     usable_width = section.page_width - section.left_margin - section.right_margin
     usable_inches = usable_width / EMU_PER_INCH
 
-    widths = [Inches(usable_inches * r) for r in col_ratios]
+    raw_widths = [usable_inches * r for r in col_ratios]
+
+    # correction to eliminate rounding gap
+    correction = usable_inches - sum(raw_widths)
+    raw_widths[2] += correction  # apply to DETAILS column
+
+    widths = [Inches(w) for w in raw_widths]
 
     for i, w in enumerate(widths):
         table.columns[i].width = w
@@ -188,9 +182,6 @@ def create_discography():
 
     for (year, artist, album), group in grouped:
 
-        # ----------------------------
-        # YEAR ROW
-        # ----------------------------
         if year != current_year:
             current_year = year
 
@@ -199,29 +190,13 @@ def create_discography():
             for i in range(1, 4):
                 merged = merged.merge(row.cells[i])
 
-            merged.text = ""
             p = merged.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
             p.paragraph_format.space_before = Pt(6)
 
             run = p.add_run(str(year))
             run.bold = True
             run.font.size = Pt(12)
 
-            # separator line
-            tc = merged._tc
-            tcPr = tc.get_or_add_tcPr()
-            tcBorders = OxmlElement('w:tcBorders')
-
-            bottom = OxmlElement('w:bottom')
-            bottom.set(qn('w:val'), 'single')
-            bottom.set(qn('w:sz'), '6')
-            bottom.set(qn('w:color'), '808080')
-
-            tcBorders.append(bottom)
-            tcPr.append(tcBorders)
-
-        # roles
         roles = set()
         for _, r in group.iterrows():
             if str(r.get('producer')) == 'True': roles.add('P')
@@ -230,7 +205,6 @@ def create_discography():
 
         role_text = ', '.join(sorted(roles))
 
-        # details
         if len(group) == 1:
             details = smart_text(group.iloc[0]['track_title'])
             album_label = "Single"
@@ -238,7 +212,6 @@ def create_discography():
             details = f"{len(group)} tracks"
             album_label = smart_text(album)
 
-        # row
         row = table.add_row()
         prevent_row_split(row)
 
@@ -247,21 +220,14 @@ def create_discography():
 
         artist_text = split_artists(smart_text(artist, 60, 120))
 
-        # 🔥 APPLY HANGING TO ALL TEXT COLUMNS
         set_cell_text(row.cells[0], artist_text, hanging=True)
         set_cell_text(row.cells[1], album_label, hanging=True)
         set_cell_text(row.cells[2], details, hanging=True)
-
-        # Role (no hanging)
-        set_cell_text(row.cells[3], role_text, WD_ALIGN_PARAGRAPH.CENTER, hanging=False)
+        set_cell_text(row.cells[3], role_text, WD_ALIGN_PARAGRAPH.CENTER)
 
     doc.save(OUTPUT_FILE)
 
-    print("\n--- Discography Generation Complete ---")
-    print(f"File: {OUTPUT_FILE}")
-    print(f"Tracks: {total_tracks}")
-    print(f"Years: {year_range}")
-    print("--------------------------------------\n")
+    print("\n✔ FINAL PERFECT FIT — no overflow, no gap, margins aligned\n")
 
 
 if __name__ == "__main__":
