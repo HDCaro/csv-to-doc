@@ -1,6 +1,6 @@
 import pandas as pd
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_SECTION
@@ -39,6 +39,20 @@ def prevent_row_split(row):
     tr = row._tr
     trPr = tr.get_or_add_trPr()
     trPr.append(OxmlElement('w:cantSplit'))
+
+
+def keep_with_next(row):
+    for cell in row.cells:
+        for p in cell.paragraphs:
+            p.paragraph_format.keep_with_next = True
+
+
+def set_repeat_table_header(row):
+    tr = row._tr
+    trPr = tr.get_or_add_trPr()
+    tblHeader = OxmlElement('w:tblHeader')
+    tblHeader.set(qn('w:val'), "true")
+    trPr.append(tblHeader)
 
 
 def smart_text(text, max_len=40, hard_limit=70):
@@ -115,25 +129,28 @@ def build_table(doc, grouped, col_ratios):
     table.autofit = False
     table.allow_autofit = False
 
-    # 🔥 Match document table style
     table.style = 'Table Grid'
-
-    # 🔥 Force full width (Word handles layout)
     set_table_full_width(table)
 
     headers = ['Artist', 'Album', 'Details', 'Role']
 
+    header_row = table.rows[0]
+
     for i, text in enumerate(headers):
-        cell = table.rows[0].cells[i]
+        cell = header_row.cells[i]
         set_cell_text(cell, text, WD_ALIGN_PARAGRAPH.CENTER)
         for run in cell.paragraphs[0].runs:
             run.bold = True
             run.font.size = Pt(10)
 
+    # 🔥 Repeat header on every page
+    set_repeat_table_header(header_row)
+
     current_year = None
 
     for (year, artist, album), group in grouped:
 
+        # YEAR ROW
         if year != current_year:
             current_year = year
 
@@ -149,6 +166,10 @@ def build_table(doc, grouped, col_ratios):
             run.bold = True
             run.font.size = Pt(12)
 
+            # 🔥 Prevent orphan year
+            keep_with_next(row)
+
+        # roles
         roles = set()
         for _, r in group.iterrows():
             if str(r.get('producer')) == 'True': roles.add('P')
@@ -157,6 +178,7 @@ def build_table(doc, grouped, col_ratios):
 
         role_text = ', '.join(sorted(roles))
 
+        # details
         if len(group) == 1:
             details = smart_text(group.iloc[0]['track_title'])
             album_label = "Single"
@@ -215,7 +237,7 @@ def create_discography():
         run.font.size = Pt(16)
         run.font.name = "Georgia"
 
-    # 🔥 FIXED LINE BREAK
+    # 🔥 Line break after "as"
     summary = doc.add_paragraph(
         f"Discography of {total_tracks} tracks ({year_range}), documenting Richard Niles’ work as\nproducer (P), arranger (A), and composer (C)."
     )
@@ -241,7 +263,7 @@ def create_discography():
 
     doc2.save(TABLE_ONLY_FILE)
 
-    print("\n✔ FINAL — perfect layout + style + width\n")
+    print("\n✔ FINAL — headers repeat + no orphan years\n")
 
 
 if __name__ == "__main__":
