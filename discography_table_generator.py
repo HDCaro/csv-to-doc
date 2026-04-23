@@ -6,8 +6,8 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_SECTION
 from docx.oxml.shared import OxmlElement, qn
 
-BOOK_PATH = 'HITS AND HAPPINESS FINAL Format.docx'
-OUTPUT_FILE = 'Hits And Happiness Final Discog.docx'
+BOOK_PATH = 'HITS AND HAPPINESS FINAL 2 Format.docx'
+OUTPUT_FILE = 'Hits And Happiness Final 2 Discog.docx'
 TABLE_ONLY_FILE = 'Richard Niles Discography Table.docx'
 
 
