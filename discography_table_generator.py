@@ -10,6 +10,8 @@ BOOK_PATH = 'HITS AND HAPPINESS FINAL 2 Format.docx'
 OUTPUT_FILE = 'Hits And Happiness Final 2 Discog.docx'
 TABLE_ONLY_FILE = 'Richard Niles Discography Table.docx'
 
+BOOKS_CSV = 'richard_niles_books.csv'
+
 
 # ----------------------------
 # Helpers
@@ -55,6 +57,17 @@ def set_repeat_table_header(row):
     trPr.append(tblHeader)
 
 
+def set_table_full_width(table):
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+
+    tblW = OxmlElement('w:tblW')
+    tblW.set(qn('w:type'), 'pct')
+    tblW.set(qn('w:w'), '5000')  # 100%
+
+    tblPr.append(tblW)
+
+
 def smart_text(text, max_len=40, hard_limit=70):
     text = str(text).strip()
     if len(text) <= max_len:
@@ -71,57 +84,35 @@ def split_artists(text):
     return ",\n".join(parts)
 
 
-def set_table_full_width(table):
-    tbl = table._tbl
-    tblPr = tbl.tblPr
-
-    tblW = OxmlElement('w:tblW')
-    tblW.set(qn('w:type'), 'pct')
-    tblW.set(qn('w:w'), '5000')  # 100%
-
-    tblPr.append(tblW)
+def normalize_multiline(text):
+    return str(text).replace("\\n", "\n")
 
 
 # ----------------------------
-# Column ratios
+# Discography Table
 # ----------------------------
 def compute_column_ratios(df_grouped):
-    max_artist = 1
-    max_album = 1
-    max_details = 1
+    max_artist = max_album = max_details = 1
 
-    for (year, artist, album), group in df_grouped:
+    for (_, artist, album), group in df_grouped:
         max_artist = max(max_artist, len(str(artist)))
         max_album = max(max_album, len(str(album)))
 
-        if len(group) == 1:
-            details = str(group.iloc[0]['track_title'])
-        else:
-            details = f"{len(group)} tracks"
-
+        details = group.iloc[0]['track_title'] if len(group) == 1 else f"{len(group)} tracks"
         max_details = max(max_details, len(details))
 
-    role_weight = 6
-    total = max_artist + max_album + max_details + role_weight
+    total = max_artist + max_album + max_details + 6
 
     artist = (max_artist / total) * 0.85
     album = (max_album / total)
     details = (max_details / total) * 1.10
-    role = (role_weight / total)
+    role = (6 / total)
 
     total2 = artist + album + details + role
 
-    return [
-        artist / total2,
-        album / total2,
-        details / total2,
-        role / total2
-    ]
+    return [artist/total2, album/total2, details/total2, role/total2]
 
 
-# ----------------------------
-# Build table
-# ----------------------------
 def build_table(doc, grouped, col_ratios):
 
     table = doc.add_table(rows=1, cols=4)
@@ -133,7 +124,6 @@ def build_table(doc, grouped, col_ratios):
     set_table_full_width(table)
 
     headers = ['Artist', 'Album', 'Details', 'Role']
-
     header_row = table.rows[0]
 
     for i, text in enumerate(headers):
@@ -141,35 +131,27 @@ def build_table(doc, grouped, col_ratios):
         set_cell_text(cell, text, WD_ALIGN_PARAGRAPH.CENTER)
         for run in cell.paragraphs[0].runs:
             run.bold = True
-            run.font.size = Pt(10)
 
-    # 🔥 Repeat header on every page
     set_repeat_table_header(header_row)
 
     current_year = None
 
     for (year, artist, album), group in grouped:
 
-        # YEAR ROW
         if year != current_year:
             current_year = year
-
             row = table.add_row()
             merged = row.cells[0]
             for i in range(1, 4):
                 merged = merged.merge(row.cells[i])
 
             p = merged.paragraphs[0]
-            p.paragraph_format.space_before = Pt(6)
-
             run = p.add_run(str(year))
             run.bold = True
             run.font.size = Pt(12)
 
-            # 🔥 Prevent orphan year
             keep_with_next(row)
 
-        # roles
         roles = set()
         for _, r in group.iterrows():
             if str(r.get('producer')) == 'True': roles.add('P')
@@ -178,7 +160,6 @@ def build_table(doc, grouped, col_ratios):
 
         role_text = ', '.join(sorted(roles))
 
-        # details
         if len(group) == 1:
             details = smart_text(group.iloc[0]['track_title'])
             album_label = "Single"
@@ -200,16 +181,51 @@ def build_table(doc, grouped, col_ratios):
 
 
 # ----------------------------
+# Books Table (NEW)
+# ----------------------------
+def build_books_table(doc):
+
+    df = pd.read_csv(BOOKS_CSV, sep='\t', encoding='cp1252')
+    df = df.fillna('')
+
+    table = doc.add_table(rows=1, cols=4)
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    table.autofit = False
+    table.allow_autofit = False
+
+    table.style = 'Table Grid'
+    set_table_full_width(table)
+
+    headers = ['Year', 'Title', 'Author', 'Publisher']
+    header_row = table.rows[0]
+
+    for i, text in enumerate(headers):
+        cell = header_row.cells[i]
+        set_cell_text(cell, text, WD_ALIGN_PARAGRAPH.CENTER)
+        for run in cell.paragraphs[0].runs:
+            run.bold = True
+
+    set_repeat_table_header(header_row)
+
+    for _, r in df.iterrows():
+
+        row = table.add_row()
+        prevent_row_split(row)
+
+        set_cell_text(row.cells[0], str(r['year']))
+        set_cell_text(row.cells[1], normalize_multiline(r['title']), hanging=True)
+        set_cell_text(row.cells[2], normalize_multiline(r['author']), hanging=True)
+        set_cell_text(row.cells[3], normalize_multiline(r['publisher']), hanging=True)
+
+    return table
+
+
+# ----------------------------
 # Main
 # ----------------------------
 def create_discography():
 
-    df = pd.read_csv(
-        'richard_niles_discography.csv',
-        sep='\t',
-        encoding='cp1252'
-    )
-
+    df = pd.read_csv('richard_niles_discography.csv', sep='\t', encoding='cp1252')
     df = df.fillna('')
     df['year'] = pd.to_numeric(df['year'], errors='coerce')
     df = df.dropna(subset=['year'])
@@ -218,18 +234,13 @@ def create_discography():
     df_sorted = df.sort_values(['year', 'artist', 'album', 'track_title'])
     grouped = df_sorted.groupby(['year', 'artist', 'album'])
 
-    total_tracks = len(df_sorted)
-    year_range = f"{df_sorted['year'].min()}-{df_sorted['year'].max()}"
-
     col_ratios = compute_column_ratios(grouped)
 
-    # ----------------------------
-    # BOOK VERSION
-    # ----------------------------
     doc = Document(BOOK_PATH)
     doc.add_section(WD_SECTION.NEW_PAGE)
 
-    title = doc.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR")
+    # Title
+    title = doc.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR", style='Heading 1')
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     for run in title.runs:
@@ -237,33 +248,25 @@ def create_discography():
         run.font.size = Pt(16)
         run.font.name = "Georgia"
 
-    # 🔥 Line break after "as"
-    summary = doc.add_paragraph(
-        f"Discography of {total_tracks} tracks ({year_range}), documenting Richard Niles’ work as\nproducer (P), arranger (A), and composer (C)."
-    )
-    summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    for run in summary.runs:
-        run.font.size = Pt(9)
-        run.italic = True
-
+    # Table
     build_table(doc, grouped, col_ratios)
+
+    # 🔥 Books Section
+    doc.add_page_break()
+
+    books_title = doc.add_paragraph("BOOKS BY RICHARD NILES", style='Heading 1')
+    books_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for run in books_title.runs:
+        run.bold = True
+        run.font.size = Pt(16)
+        run.font.name = "Georgia"
+
+    build_books_table(doc)
 
     doc.save(OUTPUT_FILE)
 
-    # ----------------------------
-    # TABLE ONLY
-    # ----------------------------
-    doc2 = Document()
-
-    title2 = doc2.add_paragraph("RICHARD NILES DISCOGRAPHY BY YEAR")
-    title2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    build_table(doc2, grouped, col_ratios)
-
-    doc2.save(TABLE_ONLY_FILE)
-
-    print("\n✔ FINAL — headers repeat + no orphan years\n")
+    print("\n✔ FINAL — discography + books table\n")
 
 
 if __name__ == "__main__":
